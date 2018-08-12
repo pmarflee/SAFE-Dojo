@@ -8,8 +8,11 @@ type Location =
       Region : string
       LatLong : LatLong }      
 
+type PostcodeRequest = { Postcode : string }
+
 type LocationResponse = { Postcode : string; Location : Location; DistanceToLondon : float }
 type CrimeResponse = { Crime : string; Incidents : int }
+
 type WeatherType =
     | Snow
     | Sleet

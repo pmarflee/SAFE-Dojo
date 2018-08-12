@@ -19,11 +19,13 @@ open Fulma.Components
 open Fulma.BulmaClasses
 
 open Shared
+open Fable.Core
 
 /// The different elements of the completed report.
 type Report =
     { Location : LocationResponse
-      Crimes : CrimeResponse array }
+      Crimes : CrimeResponse array
+      Weather : WeatherResponse }
 
 type ServerState = Idle | Loading | ServerError of string
 
@@ -40,6 +42,7 @@ type Msg =
     | PostcodeChanged of string
     | GotReport of Report
     | ErrorMsg of exn
+    | Clear
 
 /// The init function is called to start the message pump with an initial view.
 let init () = 
@@ -48,14 +51,20 @@ let init () =
       ValidationError = None
       ServerState = Idle }, Cmd.ofMsg (PostcodeChanged "")
 
+[<PassGenerics>]
+let getJsonSafe<'T> url record = promise {
+    let! res = Fetch.postRecord url record []
+    let! response = res.text()
+    return ofJson<'T> response
+}
+
 let getResponse postcode = promise {
-    let! location = Fetch.fetchAs<LocationResponse> (sprintf "/api/distance/%s" postcode) []
-    let! crimes = Fetch.tryFetchAs<CrimeResponse array> (sprintf "api/crime/%s" postcode) [] |> Promise.map (Result.defaultValue [||])
-    
-    (* Task 4.5 WEATHER: Fetch the weather from the API endpoint you created.
-       Then, save its value into the Report below. You'll need to add a new
-       field to the Report type first, though! *)
-    return { Location = location; Crimes = crimes } }
+    let postcodeRequest = { Postcode = postcode }
+    let! location = getJsonSafe<LocationResponse> "/api/distance" postcodeRequest
+    let! crimes = getJsonSafe "/api/crime" postcodeRequest
+    let! weather = getJsonSafe "/api/weather" postcodeRequest
+
+    return { Location = location; Crimes = crimes; Weather = weather } }
  
 /// The update function knows how to update the model given a message.
 let update msg model =
@@ -72,10 +81,12 @@ let update msg model =
         let p = p.ToUpper()
         { model with
             Postcode = p
-            (* Task 2.2 Validation. Use the Validation.validatePostcode function to implement client-side form validation.
-               Note that the validation is the same shared code that runs on the server! *)
-            ValidationError = None }, Cmd.none
+            ValidationError = 
+                match System.String.IsNullOrEmpty(p) || Validation.validatePostcode p with
+                | true -> None
+                | false -> Some("Invalid postcode") }, Cmd.none
     | _, ErrorMsg e -> { model with ServerState = ServerError e.Message }, Cmd.none
+    | _, Clear -> init()
 
 [<AutoOpen>]
 module ViewParts =
@@ -110,8 +121,7 @@ module ViewParts =
         basicTile "Map" [ Tile.Size Tile.Is12 ] [
             iframe [
                 Style [ Height 410; Width 810 ]
-                (* Task 3.1 MAPS: Use the getBingMapUrl function to build a valid maps URL using the supplied LatLong.
-                   You can use it to add a Src attribute to this iframe. *)
+                Src (getBingMapUrl latLong)
             ] [ ]
         ]
 
@@ -179,13 +189,14 @@ let view model dispatch =
                         Level.left [] [
                             Level.item [] [
                                 Button.button
-                                    [ Button.IsFullwidth
-                                      Button.Color IsPrimary
+                                    [ Button.Color IsPrimary
                                       Button.OnClick (fun _ -> dispatch GetReport)
                                       Button.Disabled (model.ValidationError.IsSome)
                                       Button.IsLoading (model.ServerState = ServerState.Loading) ]
-                                    [ str "Submit" ] ] ] ]
-
+                                    [ str "Submit" ] 
+                                Button.button
+                                    [ Button.OnClick (fun _ -> dispatch Clear) ]
+                                    [ str "Clear" ] ] ] ]
                 ]
 
             match model with
@@ -210,9 +221,7 @@ let view model dispatch =
                     Tile.ancestor [ ] [
                         Tile.parent [ Tile.IsVertical; Tile.Size Tile.Is4 ] [ 
                             locationTile model
-                            (* Task 4.6 WEATHER: Generate the view code for the weather tile
-                               using the weatherTile function, supplying the weather report
-                               from the model, and include it here as part of the list *)
+                            weatherTile model.Weather
                         ]
                         Tile.parent [ Tile.Size Tile.Is8 ] [
                             crimeTile model.Crimes
